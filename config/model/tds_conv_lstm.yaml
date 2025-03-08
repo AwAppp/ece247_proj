@@ -1,13 +1,18 @@
 # @package _global_
 module:
-  _target_: emg2qwerty.lightning.TDSConvCTCModule
+  _target_: emg2qwerty.lightning.TDSConvLSTMModule
   in_features: 528  # freq * channels = (n_fft // 2 + 1) * 16
   mlp_features: [384]
   block_channels: [24, 24, 24, 24]
   kernel_width: 32  # Total temporal receptive field of 125 samples given 4 layers
-  rnn_config: None
   batch_norm: True
   layer_norm: True
+  rnn_config: 
+    num_layers: 1
+    bidirection: False
+    dropout: 0.6
+    layer_norm: True
+    batch_norm: True
 
 datamodule:
   _target_: emg2qwerty.lightning.WindowedEMGDataModule

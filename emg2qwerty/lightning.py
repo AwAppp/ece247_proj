@@ -25,6 +25,7 @@ from emg2qwerty.modules import (
     MultiBandRotationInvariantMLP,
     SpectrogramNorm,
     TDSConvEncoder,
+    RNNBlock,
 )
 from emg2qwerty.transforms import Transform
 
@@ -150,11 +151,15 @@ class TDSConvCTCModule(pl.LightningModule):
         optimizer: DictConfig,
         lr_scheduler: DictConfig,
         decoder: DictConfig,
+        batch_norm: DictConfig,
+        layer_norm: DictConfig,
+        **kwarg,
     ) -> None:
         super().__init__()
         self.save_hyperparameters()
 
         num_features = self.NUM_BANDS * mlp_features[-1]
+        self.num_features = num_features
 
         # Model
         # inputs: (T, N, bands=2, electrode_channels=16, freq)
@@ -175,9 +180,17 @@ class TDSConvCTCModule(pl.LightningModule):
                 kernel_width=kernel_width,
             ),
             # (T, N, num_classes)
-            nn.Linear(num_features, charset().num_classes),
-            nn.LogSoftmax(dim=-1),
         )
+        self.batch_norm = batch_norm
+        self.layer_norm = layer_norm
+
+        if self.batch_norm:
+            self.BN = nn.BatchNorm1d(num_features)
+        if self.layer_norm:
+            self.LN = nn.LayerNorm(num_features)
+
+        self.fc_layer = nn.Linear(num_features, charset().num_classes)
+        self.softmax = nn.LogSoftmax(dim=-1)
 
         # Criterion
         self.ctc_loss = nn.CTCLoss(blank=charset().null_class)
@@ -194,8 +207,19 @@ class TDSConvCTCModule(pl.LightningModule):
             }
         )
 
+    def _tds(self, inputs: torch.Tensor):
+        x = self.model(inputs)
+        if self.batch_norm:
+            x = x.permute(1, 2, 0)
+            x = self.BN(x)
+            x = x.permute(2, 0, 1)
+        if self.layer_norm:
+            x = self.LN(x)
+
+        return x
+
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        return self.model(inputs)
+        return self.softmax(self.fc_layer(self._tds(inputs)))
 
     def _step(
         self, phase: str, batch: dict[str, torch.Tensor], *args, **kwargs
@@ -269,3 +293,59 @@ class TDSConvCTCModule(pl.LightningModule):
             optimizer_config=self.hparams.optimizer,
             lr_scheduler_config=self.hparams.lr_scheduler,
         )
+
+
+class TDSConvLSTMModule(TDSConvCTCModule):
+    def __init__(
+        self,
+        in_features: int,
+        mlp_features: Sequence[int],
+        block_channels: Sequence[int],
+        kernel_width: int,
+        optimizer: DictConfig,
+        lr_scheduler: DictConfig,
+        decoder: DictConfig,
+        rnn_config: DictConfig,
+        batch_norm: DictConfig,
+        layer_norm: DictConfig,
+        **kwarg,
+    ):
+        super().__init__(
+            in_features=in_features,
+            mlp_features=mlp_features,
+            block_channels=block_channels,
+            kernel_width=kernel_width,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            decoder=decoder,
+            batch_norm=batch_norm,
+            layer_norm=layer_norm,
+        )
+        self.rnn = RNNBlock(
+            input_size=self.num_features,
+            hidden_size=self.num_features,
+            num_layers=rnn_config.num_layers,
+            dropout=rnn_config.dropout,
+            bidirectional=rnn_config.bidirection,
+            useLayerNorm=rnn_config.layer_norm,
+        )
+        self.proj_rnn = nn.Linear(
+            2 * self.num_features if rnn_config.bidirection else self.num_features,
+            self.num_features,  # Reduce to match input size
+        )
+
+        self.useBatchNorm = rnn_config.batch_norm
+        if self.useBatchNorm:
+            self.BN = nn.BatchNorm1d(self.num_features)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        x = self._tds(inputs)
+        x_rnn = self.rnn(x)
+        x_rnn = self.proj_rnn(x)
+
+        if self.useBatchNorm:
+            x_rnn = x_rnn.permute(1, 2, 0)
+            x_rnn = self.BN(x_rnn)
+            x_rnn = x_rnn.permute(2, 0, 1)
+
+        return self.softmax(self.fc_layer(x_rnn))

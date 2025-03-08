@@ -278,3 +278,44 @@ class TDSConvEncoder(nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.tds_conv_blocks(inputs)  # (T, N, num_features)
+
+
+class RNNBlock(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int,
+        dropout: float,
+        bidirectional: bool = False,
+        useLayerNorm: bool = False,
+    ):
+        super().__init__()
+        self.rnn = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=False,  # Input shape: (T, N, C)
+            bidirectional=bidirectional,
+            dropout=dropout,
+        )
+        self.output_size = hidden_size * (2 if bidirectional else 1)
+
+        self.useLayerNorm = useLayerNorm
+        if self.useLayerNorm:
+            self.layer_norm = nn.LayerNorm(self.output_size)
+
+    def forward(self, x):
+        """Forward pass through the RNN layer.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (T, N, input_size)
+
+        Returns:
+            torch.Tensor: Output tensor of shape (T, N, output_size)
+        """
+        x, _ = self.rnn(x)  # Get hidden states from all time steps
+
+        if self.useLayerNorm:
+            x = self.layer_norm(x)
+        return x
