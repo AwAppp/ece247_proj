@@ -341,7 +341,7 @@ class TDSConvLSTMModule(TDSConvCTCModule):
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         x = self._tds(inputs)
         x_rnn = self.rnn(x)
-        x_rnn = self.proj_rnn(x)
+        x_rnn = self.proj_rnn(x_rnn)
 
         if self.useBatchNorm:
             x_rnn = x_rnn.permute(1, 2, 0)
