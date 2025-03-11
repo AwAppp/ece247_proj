@@ -319,3 +319,42 @@ class RNNBlock(nn.Module):
         if self.useLayerNorm:
             x = self.layer_norm(x)
         return x
+
+
+class AttentionBlock(nn.Module):
+    def __init__(
+        self,
+        input_size: int,
+        num_heads: int,
+        dropout: float,
+        useLayerNorm: bool = False,
+    ):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(
+            embed_dim=input_size,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=False,
+        )
+        self.dropout = nn.Dropout(p=dropout)
+        self.useLayerNorm = useLayerNorm
+
+        if self.useLayerNorm:
+            self.layer_norm = nn.LayerNorm(input_size)
+
+    def forward(self, x):
+        """Forward pass through the attention layer.
+
+        Args:
+            x (torch.Tensor): Input tensor of shape (T, N, input_size)
+
+        Returns:
+            torch.Tensor: Output tensor of shape (T, N, input_size)
+        """
+        attn_output, _ = self.attn(x, x, x)  # Self-attention
+        x = x + self.dropout(attn_output)  # Add residual connection
+
+        if self.useLayerNorm:
+            x = self.layer_norm(x)
+
+        return x

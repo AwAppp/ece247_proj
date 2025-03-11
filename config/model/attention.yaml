@@ -1,6 +1,6 @@
 # @package _global_
 module:
-  _target_: emg2qwerty.lightning.TDSConvLSTMModuleV3
+  _target_: emg2qwerty.lightning.TDSConvAttentionModuleV1
   in_features: 528  # freq * channels = (n_fft // 2 + 1) * 16
   mlp_features: [384]
   block_channels: [24, 24, 24, 24]
@@ -13,6 +13,7 @@ module:
     dropout: 0.6
     layer_norm: True
     batch_norm: False
+    rnn_dim: 128
 
 datamodule:
   _target_: emg2qwerty.lightning.WindowedEMGDataModule

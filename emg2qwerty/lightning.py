@@ -26,8 +26,10 @@ from emg2qwerty.modules import (
     SpectrogramNorm,
     TDSConvEncoder,
     RNNBlock,
+    AttentionBlock,
 )
 from emg2qwerty.transforms import Transform
+import logging
 
 
 class WindowedEMGDataModule(pl.LightningDataModule):
@@ -348,4 +350,203 @@ class TDSConvLSTMModule(TDSConvCTCModule):
             x_rnn = self.BN(x_rnn)
             x_rnn = x_rnn.permute(2, 0, 1)
 
+        m = nn.Dropout(p=0.4)
+        x_rnn = m(x_rnn)
+
         return self.softmax(self.fc_layer(x_rnn))
+
+
+class TDSConvLSTMModuleV2(TDSConvCTCModule):
+    def __init__(
+        self,
+        in_features: int,
+        mlp_features: Sequence[int],
+        block_channels: Sequence[int],
+        kernel_width: int,
+        optimizer: DictConfig,
+        lr_scheduler: DictConfig,
+        decoder: DictConfig,
+        rnn_config: DictConfig,
+        batch_norm: DictConfig,
+        layer_norm: DictConfig,
+        **kwarg,
+    ):
+        super().__init__(
+            in_features=in_features,
+            mlp_features=mlp_features,
+            block_channels=block_channels,
+            kernel_width=kernel_width,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            decoder=decoder,
+            batch_norm=batch_norm,
+            layer_norm=layer_norm,
+        )
+        self.rnn = RNNBlock(
+            input_size=self.num_features,
+            hidden_size=self.num_features,
+            num_layers=rnn_config.num_layers,
+            dropout=rnn_config.dropout,
+            bidirectional=rnn_config.bidirection,
+            useLayerNorm=rnn_config.layer_norm,
+        )
+        self.fc_layer = nn.Linear(
+            2 * self.num_features if rnn_config.bidirection else self.num_features,
+            charset().num_classes,  # Reduce to match input size
+        )
+
+        self.useBatchNorm = rnn_config.batch_norm
+        if self.useBatchNorm:
+            self.BN = nn.BatchNorm1d(self.num_features)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        x = self._tds(inputs)
+        x_rnn = self.rnn(x)
+        m = nn.Dropout(p=0.4)
+        x_rnn = m(x_rnn)
+
+        if self.useBatchNorm:
+            x_rnn = x_rnn.permute(1, 2, 0)
+            x_rnn = self.BN(x_rnn)
+            x_rnn = x_rnn.permute(2, 0, 1)
+
+        x_rnn = m(x_rnn)
+
+        return self.softmax(self.fc_layer(x_rnn))
+
+
+class TDSConvLSTMModuleV3(TDSConvCTCModule):
+    def __init__(
+        self,
+        in_features: int,
+        mlp_features: Sequence[int],
+        block_channels: Sequence[int],
+        kernel_width: int,
+        optimizer: DictConfig,
+        lr_scheduler: DictConfig,
+        decoder: DictConfig,
+        rnn_config: DictConfig,
+        batch_norm: DictConfig,
+        layer_norm: DictConfig,
+        **kwarg,
+    ):
+        super().__init__(
+            in_features=in_features,
+            mlp_features=mlp_features,
+            block_channels=block_channels,
+            kernel_width=kernel_width,
+            optimizer=optimizer,
+            lr_scheduler=lr_scheduler,
+            decoder=decoder,
+            batch_norm=batch_norm,
+            layer_norm=layer_norm,
+        )
+
+        self.rnn_dim = rnn_config.rnn_dim
+        self.rnn_dropout_p = rnn_config.dropout
+
+        self.toRnn = nn.Linear(self.num_features, self.rnn_dim)
+
+        self.rnn = RNNBlock(
+            input_size=self.rnn_dim,
+            hidden_size=self.rnn_dim,
+            num_layers=rnn_config.num_layers,
+            dropout=rnn_config.dropout,
+            bidirectional=rnn_config.bidirection,
+            useLayerNorm=rnn_config.layer_norm,
+        )
+        self.fc_layer = nn.Linear(
+            2 * self.rnn_dim if rnn_config.bidirection else self.rnn_dim,
+            charset().num_classes,  # Reduce to match input size
+        )
+
+        self.useBatchNorm = rnn_config.batch_norm
+        if self.useBatchNorm:
+            self.BN = nn.BatchNorm1d(self.num_features)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        x = self._tds(inputs)
+        x = self.toRnn(x)
+
+        m = nn.Dropout(p=self.rnn_dropout_p)
+
+        x = m(x)
+
+        x_rnn = self.rnn(x)
+
+        if self.useBatchNorm:
+            x_rnn = x_rnn.permute(1, 2, 0)
+            x_rnn = self.BN(x_rnn)
+            x_rnn = x_rnn.permute(2, 0, 1)
+
+        x_rnn = m(x_rnn)
+
+        return self.softmax(self.fc_layer(x_rnn))
+
+
+# class TDSConvAttentionModuleV1(TDSConvCTCModule):
+#     def __init__(
+#         self,
+#         in_features: int,
+#         mlp_features: Sequence[int],
+#         block_channels: Sequence[int],
+#         kernel_width: int,
+#         optimizer: DictConfig,
+#         lr_scheduler: DictConfig,
+#         decoder: DictConfig,
+#         # attn_config: DictConfig,
+#         batch_norm: DictConfig,
+#         layer_norm: DictConfig,
+#         **kwargs,
+#     ):
+#         super().__init__(
+#             in_features=in_features,
+#             mlp_features=mlp_features,
+#             block_channels=block_channels,
+#             kernel_width=kernel_width,
+#             optimizer=optimizer,
+#             lr_scheduler=lr_scheduler,
+#             decoder=decoder,
+#             batch_norm=batch_norm,
+#             layer_norm=layer_norm,
+#         )
+
+#         self.attn_dim = 128  # attn_config.attn_dim
+#         self.attn_dropout_p = 0.6  # attn_config.dropout
+
+#         self.toAttn = nn.Linear(self.num_features, self.attn_dim)
+
+#         self.attn = AttentionBlock(
+#             input_size=self.attn_dim,
+#             num_heads=4,  # attn_config.num_heads,
+#             dropout=self.attn_dropout_p,
+#             useLayerNorm=True,  # attn_config.layer_norm,
+#         )
+
+#         self.fc_layer = nn.Linear(
+#             self.attn_dim,
+#             charset().num_classes,  # Reduce to match input size
+#         )
+
+#         self.useBatchNorm = False  # attn_config.batch_norm
+#         if self.useBatchNorm:
+#             self.BN = nn.BatchNorm1d(self.num_features)
+
+#     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+#         x = self._tds(inputs)
+#         x = self.toAttn(x)
+
+#         m = nn.Dropout(p=self.attn_dropout_p)
+
+#         x = m(x)
+
+#         x_attn = self.attn(x)
+
+#         if self.useBatchNorm:
+#             x_attn = x_attn.permute(1, 2, 0)  # Convert to (N, C, T)
+#             x_attn = self.BN(x_attn)
+#             x_attn = x_attn.permute(2, 0, 1)  # Convert back to (T, N, C)
+
+#         x_attn = m(x_attn)
+
+#         return self.softmax(self.fc_layer(x_attn))

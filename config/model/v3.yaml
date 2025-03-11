@@ -13,6 +13,7 @@ module:
     dropout: 0.6
     layer_norm: True
     batch_norm: False
+    rnn_dim: 128
 
 datamodule:
   _target_: emg2qwerty.lightning.WindowedEMGDataModule
