@@ -1,7 +1,7 @@
 defaults:
   - user: single_user
   - transforms: log_spectrogram
-  - model: v3
+  - model: tds_conv_lstm
   - optimizer: adam
   - lr_scheduler: linear_warmup_cosine_annealing
   - decoder: ctc_greedy
